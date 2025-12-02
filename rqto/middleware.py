@@ -25,9 +25,7 @@ class RequestQueueTimeoutMiddleware:
             return self.get_response(request)
 
         try:
-            request_start = (
-                int(request_start_header) / 1000
-            )  # Convert from header's milliseconds to seconds
+            request_start = self._parse_request_start(request_start_header)
         except (TypeError, ValueError):
             logger.warning(
                 f"Could not interpret `X-Request-Start` header value: {request_start_header}"
@@ -46,3 +44,24 @@ class RequestQueueTimeoutMiddleware:
             )
 
         return self.get_response(request)
+
+    def _parse_request_start(self, header_value):
+        """
+        Parse the X-Request-Start header value into seconds since epoch.
+
+        Supports two formats:
+        - Heroku: milliseconds since epoch (e.g., "1693406590527")
+        - Scalingo: "t=" prefix with seconds.milliseconds (e.g., "t=1693406590.527")
+
+        Returns:
+            float: seconds since epoch
+
+        Raises:
+            ValueError: if the header value cannot be parsed
+        """
+        # Handle Scalingo format: t=1693406590.527
+        if header_value.startswith("t="):
+            return float(header_value[2:])
+
+        # Handle Heroku format: milliseconds since epoch
+        return int(header_value) / 1000

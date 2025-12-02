@@ -103,3 +103,55 @@ class RequestQueueTimeoutMiddlewareTests(SimpleTestCase):
             )  # convert seconds to milliseconds for header
             frozen_time.tick(delta=simulated_queue_time)
             return self.request_with_request_start_header(request_start)
+
+    def request_with_queue_time_scalingo(self, simulated_queue_time):
+        """
+        Perform a request using Scalingo's X-Request-Start format (t=seconds.milliseconds)
+
+        Args:
+            simulated_queue_time: amount of time request spent in queue; accepts either a number (in seconds) or a
+                `datetime.timedelta`
+
+        """
+        if not isinstance(simulated_queue_time, timedelta):
+            simulated_queue_time = timedelta(seconds=simulated_queue_time)
+
+        with freeze_time() as frozen_time:
+            request_start = f"t={time.time():.3f}"
+            frozen_time.tick(delta=simulated_queue_time)
+            return self.request_with_request_start_header(request_start)
+
+
+class ScalingoFormatTests(RequestQueueTimeoutMiddlewareTests):
+    """
+    Tests for Scalingo's X-Request-Start format: t=1693406590.527
+    """
+
+    def test_scalingo_format_queue_time_added_to_request(self):
+        queue_time = 10
+        response = self.request_with_queue_time_scalingo(queue_time)
+        self.assertAlmostEqual(
+            response.wsgi_request.queue_time_in_seconds, queue_time, delta=0.001
+        )
+
+    def test_scalingo_format_enforcement_defaults_to_30_seconds(self):
+        self.check_enforcement_threshold_scalingo(30)
+
+    def test_scalingo_format_enforcement_is_configurable_by_setting(self):
+        timeout = 60
+        with self.settings(REQUEST_QUEUE_TIMEOUT_IN_SECONDS=60):
+            self.check_enforcement_threshold_scalingo(timeout)
+
+    def check_enforcement_threshold_scalingo(self, expected_threshold):
+        if not isinstance(expected_threshold, timedelta):
+            expected_threshold = timedelta(seconds=expected_threshold)
+
+        response = self.request_with_queue_time_scalingo(
+            expected_threshold - timedelta(milliseconds=1)
+        )
+        self.assertEqual(response.status_code, http.HTTPStatus.OK)
+
+        response = self.request_with_queue_time_scalingo(
+            expected_threshold + timedelta(milliseconds=1)
+        )
+        self.assertEqual(response.status_code, http.HTTPStatus.SERVICE_UNAVAILABLE)
